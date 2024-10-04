@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Stopwatch</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+        }
+        .stopwatch {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .time {
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+        .buttons button {
+            font-size: 1em;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="stopwatch">
+        <div class="time" id="timeDisplay">00:00:00</div>
+        <div class="buttons">
+            <button onclick="startStop()" id="startStopButton">Start</button>
+            <button onclick="reset()">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        let startTime = 0;
+        let updatedTime = 0;
+        let difference = 0;
+        let timerInterval;
+        let running = false;
+
+        function updateDisplay() {
+            let hours = Math.floor(difference / 3600000);
+            let minutes = Math.floor((difference % 3600000) / 60000);
+            let seconds = Math.floor((difference % 60000) / 1000);
+            
+            hours = hours < 10 ? '0' + hours : hours;
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            seconds = seconds < 10 ? '0' + seconds : seconds;
+            
+            document.getElementById('timeDisplay').innerText = `${hours}:${minutes}:${seconds}`;
+        }
+
+        function startStop() {
+            if (!running) {
+                startTime = Date.now() - difference;
+                timerInterval = setInterval(function() {
+                    updatedTime = Date.now();
+                    difference = updatedTime - startTime;
+                    updateDisplay();
+                }, 1000);
+                document.getElementById('startStopButton').innerText = 'Stop';
+                running = true;
+            } else {
+                clearInterval(timerInterval);
+                document.getElementById('startStopButton').innerText = 'Start';
+                running = false;
+            }
+        }
+
+        function reset() {
+            clearInterval(timerInterval);
+            running = false;
+            difference = 0;
+            document.getElementById('timeDisplay').innerText = '00:00:00';
+            document.getElementById('startStopButton').innerText = 'Start';
+        }
+    </script>
+</body>
+</html>
