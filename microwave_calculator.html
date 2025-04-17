@@ -1,0 +1,85 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Microwave Time Calculator – Green‑Tea Mug (303 g water)</title>
+<style>
+body{font-family:system-ui,Arial,Helvetica,sans-serif;max-width:600px;margin:40px auto;padding:0 1rem;line-height:1.5}
+h1{font-size:1.4rem}
+label{display:block;margin-top:1rem}
+input{padding:0.4rem;font-size:1rem;width:100%}
+button{margin-top:1.2rem;padding:0.6rem 1.2rem;font-size:1rem;cursor:pointer}
+output{display:block;margin-top:1.2rem;font-size:1.1rem;font-weight:bold}
+small{color:#555}
+</style>
+</head>
+<body>
+<h1>Microwave Time Calculator<br><small>for 303 g water in a 250 g ceramic mug</small></h1>
+
+<form id="calcForm">
+  <label>
+    Start temperature (°C)
+    <input type="number" id="startTemp" value="36" step="0.1" required>
+  </label>
+  <label>
+    Target temperature (°C)
+    <input type="number" id="targetTemp" value="80" step="0.1" required>
+  </label>
+  
+  <details>
+    <summary style="margin-top:1rem;cursor:pointer">Advanced settings (mass / power)</summary>
+    <label>
+      Water mass (g)
+      <input type="number" id="waterMass" value="303" step="1">
+    </label>
+    <label>
+      Mug mass (g) <small>(ceramic)</small>
+      <input type="number" id="mugMass" value="250" step="1">
+    </label>
+    <label>
+      Microwave effective power delivered (W)
+      <input type="number" id="power" value="480" step="10">
+    </label>
+  </details>
+  
+  <button type="submit">Calculate time</button>
+  <output id="result"></output>
+</form>
+
+<script>
+const cWater = 4186;              // J/(kg·°C)
+const cCeramic = 880;             // J/(kg·°C)
+
+function fmtTime(seconds){
+  const mins = Math.floor(seconds/60);
+  const secs = Math.round(seconds % 60);
+  return (mins>0? mins + " min ":"") + secs + " s";
+}
+
+document.getElementById("calcForm").addEventListener("submit", function(e){
+  e.preventDefault();
+  const T0 = parseFloat(document.getElementById("startTemp").value);
+  const Tt = parseFloat(document.getElementById("targetTemp").value);
+  const mWater = parseFloat(document.getElementById("waterMass").value)/1000; // kg
+  const mMug = parseFloat(document.getElementById("mugMass").value)/1000;     // kg
+  const P = parseFloat(document.getElementById("power").value);               // W
+  
+  if(Tt <= T0){
+    document.getElementById("result").textContent = "Target temperature must be higher than start.";
+    return;
+  }
+  
+  const dT = Tt - T0;
+  const Q = mWater * cWater * dT + mMug * cCeramic * dT; // J
+  const timeSec = Q / P;
+  
+  document.getElementById("result").textContent = "Heat for about " + fmtTime(timeSec);
+});
+</script>
+
+<footer style="margin-top:3rem;font-size:0.8rem;color:#666">
+Made for Markus • Uses metric units • Assumes ceramic mug c ≈ 0.88 kJ kg⁻¹ °C⁻¹
+</footer>
+</body>
+</html>
