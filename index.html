@@ -2,40 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HTML File Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebTest Index</title>
   <style>
-    body { font-family: sans-serif; padding: 2em; background: #111; color: #eee; }
-    a { color: #4fc3f7; text-decoration: none; display: block; margin: 0.5em 0; }
+    html { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #161616; color: #e5e5e5; padding: 2em 1em; }
+    h1 { font-size: 1.25em; text-align: center; margin-bottom: 1.2em; }
+    .list { display: flex; flex-direction: column; gap: .7em; max-width: 400px; margin: 0 auto; }
+    a { padding: .9em 1em; border-radius: 8px; background: #222; color: #46c8fa; text-decoration: none; text-align: center; font-size: 1em; }
+    a:active { background: #333; }
+    .footer { text-align: center; margin-top: 2em; font-size: .85em; color: #888; }
   </style>
 </head>
 <body>
-  <h1>Available Pages</h1>
-  <div id="file-list">Loading...</div>
-
+  <h1>WebTest Prototypes</h1>
+  <div id="list" class="list">Loading…</div>
+  <div class="footer">GitHub Pages</div>
   <script>
-    const repo = "ThatRick/WebTest";
-    const branch = "main";
-    const apiUrl = `https://api.github.com/repos/${repo}/contents/?ref=${branch}`;
-    const baseUrl = `https://thatrick.github.io/WebTest/`;
-
-    fetch(apiUrl)
-      .then(res => res.json())
+    fetch("https://api.github.com/repos/ThatRick/WebTest/contents/")
+      .then(r=>r.json())
       .then(files => {
-        const htmlFiles = files.filter(file => file.name.endsWith('.html'));
-        const container = document.getElementById('file-list');
-        container.innerHTML = '';
-
-        htmlFiles.forEach(file => {
-          const a = document.createElement('a');
-          a.href = baseUrl + file.name;
-          a.textContent = file.name;
-          container.appendChild(a);
-        });
+        document.getElementById("list").innerHTML = files
+          .filter(f=>f.name.endsWith(".html"))
+          .sort((a,b)=>a.name.localeCompare(b.name,'en',{sensitivity:'base'}))
+          .map(f=>`<a href="https://thatrick.github.io/WebTest/${f.name}">${f.name.replace(".html","").replace(/_/g," ")}</a>`)
+          .join("") || "<i>No HTML files found.</i>";
       })
-      .catch(err => {
-        document.getElementById('file-list').textContent = 'Failed to load file list.';
-        console.error(err);
-      });
+      .catch(()=>{ document.getElementById("list").textContent="Failed to load files."; });
   </script>
 </body>
 </html>
