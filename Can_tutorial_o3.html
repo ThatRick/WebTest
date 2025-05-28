@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Getting Started with Tesla CAN Interfaces – A Hands-On Guide for Automation Engineers</title>
+<style>
+body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.5;margin:0 1.2rem 4rem}
+h1,h2,h3{color:#0070c0;margin-top:2.2rem}
+code,pre{background:#f7f7f7;border:1px solid #e2e2e2;border-radius:4px;padding:.2rem .4rem;font-size:.9rem}
+pre{overflow-x:auto}
+figure{margin:1.8rem 0;text-align:center}
+figcaption{font-size:.85rem;color:#666}
+table{border-collapse:collapse}
+th,td{border:1px solid #ccc;padding:.4rem .6rem}
+</style>
+</head>
+
+<body>
+
+<h1>Getting Started with Tesla CAN Interfaces</h1>
+
+<p><strong>Audience.</strong> This tutorial is written for Markus-style automation engineers and programmers who already know the basics of embedded programming and networks, and who prefer the metric system.</p>
+
+<p><strong>⚠️  Legal & safety notice.</strong> Everything below is <em>informational</em>. Connecting to, much less transmitting on, a vehicle CAN bus can void warranties, violate local regulations, and – worst-case – interfere with safety-critical systems. Use a <em>listen-only</em> adapter while you learn; keep the wheels chocked and the high-voltage system off when experimenting. You are responsible for any risk you take.</p>
+
+<nav>
+<h2>Contents</h2>
+<ol>
+  <li><a href="#topology">Tesla CAN topology in a nutshell</a></li>
+  <li><a href="#read">What you can read (examples)</a></li>
+  <li><a href="#write">What, if anything, you can safely write</a></li>
+  <li><a href="#hardware">Hardware shopping list</a></li>
+  <li><a href="#arch">Suggested ESP32 <span style="white-space:nowrap;">⇆ </span>WebSocket <span style="white-space:nowrap;">⇆ </span>Phone architecture</a></li>
+  <li><a href="#project">Step-by-step first project: behind-the-wheel phone speedometer</a></li>
+  <li><a href="#next">Where to go next</a></li>
+</ol>
+</nav>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="topology">1.&nbsp;Tesla CAN topology in a nutshell</h2>
+
+<p>Tesla vehicles expose several physically separate CAN channels that converge in the central Gateway ECU:</p>
+
+<table>
+<thead><tr><th>Common alias</th><th>Nominal speed</th><th>Main payload</th><th>How to access</th></tr></thead>
+<tbody>
+<tr><td>Powertrain&nbsp;CAN</td><td>500 kbit/s</td><td>Battery, inverter, motor torque</td><td>6-pin “Autopilot” harness in frunk</td></tr>
+<tr><td>Chassis CAN&nbsp;#2</td><td>500 kbit/s (<em>Plaid refresh: 125→500 kbit/s</em>)</td><td>Wheel speeds, steering angle, ABS</td><td>Diagnostics connector pin 9&10</td></tr>
+<tr><td>Body CAN</td><td>250 kbit/s</td><td>Doors, lights, HVAC</td><td>BCM under dash</td></tr>
+<tr><td>Diag CAN</td><td>500 kbit/s or 1 Mbit/s (2024 Model 3: OBD-II)</td><td>Service & UDS traffic</td><td>OBD-like connector or splitter cable</td></tr>
+</tbody>
+</table>
+<p class="cite">Autopilot harness location  [oai_citation:0‡Instructables](https://www.instructables.com/Exploring-the-Tesla-Model-S-CAN-Bus/?utm_source=chatgpt.com) &nbsp;|&nbsp; Chassis-CAN bitrate change on Plaid  [oai_citation:1‡Tesla Motors Club](https://teslamotorsclub.com/tmc/threads/plaid-refresh-can-data.256623/?utm_source=chatgpt.com) &nbsp;|&nbsp; OBD port on 2024 Model 3  [oai_citation:2‡Reddit](https://www.reddit.com/r/TeslaModel3/comments/1cx9rjh/2024_model_3_has_standard_obd_port/?utm_source=chatgpt.com)</p>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="read">2.&nbsp;What you can read</h2>
+
+<p>The good news: Tesla broadcasts a <em>lot</em> of real-time data without authentication. Below are crowd-sourced IDs that have been stable for years on Model S/X and partly on Model 3/Y (double-check on your generation):</p>
+
+<table>
+<thead><tr><th>CAN ID (hex)</th><th>Signals (little-endian unless noted)</th><th>Conversion (metric)</th></tr></thead>
+<tbody>
+<tr><td>0x118</td><td>Vehicle speed [15:0]</td><td>value ÷ 20 → km/h</td></tr>
+<tr><td>0x130</td><td>Steering angle [15:0]</td><td>value × 0.1 → °</td></tr>
+<tr><td>0x237</td><td>Battery SoC [7:0]</td><td>value → %</td></tr>
+<tr><td>0x12F</td><td>Brake-pedal percentage [7:0]</td><td>value → %</td></tr>
+</tbody>
+</table>
+<p class="cite">Frame list derived from wk057 CAN dump  [oai_citation:3‡skie.net](https://skie.net/uploads/TeslaCAN/Tesla%20Model%20S%20CAN%20Deciphering%20-%20v0.1%20-%20by%20wk057.pdf?utm_source=chatgpt.com)</p>
+
+<p>With these four frames you can already build a basic dashboard, datalogger, or automation trigger.</p>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="write">3.&nbsp;What, if anything, you can safely write</h2>
+
+<ul>
+<li><strong>Body & diagnostic requests.</strong> Gateway allows UDS “tester-present” and read DIDs (e.g.&nbsp;VIN) on the diagnostic bus. Useful for querying without risk.<br></li>
+<li><strong>Chassis or powertrain commands.</strong> <em>Heavily</em> filtered by the Gateway; critical frames often require Tesla’s proprietary RSA signature. Unless you are writing a research tool in a non-moving car, keep transmit OFF.</li>
+<li><strong>Reverse indicator, horn, etc.</strong> Some non-safety functions on Body CAN accept plain frames; use only in a controlled environment.</li>
+</ul>
+
+<p><em>Rule of thumb:</em> start in <code>listen-only</code> mode (<code>ip link set can0 type can bitrate 500000 <strong>listen-only on</strong></code>)  [oai_citation:4‡Instructables](https://www.instructables.com/Exploring-the-Tesla-Model-S-CAN-Bus/?utm_source=chatgpt.com), capture the frames you need, and leave TX disabled.</p>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="hardware">4.&nbsp;Hardware shopping list</h2>
+
+<ol>
+<li><strong>Vehicle-side adapter harness</strong><br>
+   – Model 3/Y splitter cable (20-pin to RJ-45 + OBD-II) ~ €35 – €50  [oai_citation:5‡EVOffer](https://evoffer.com/product/model-3-y-can-diagnostic-cable/?utm_source=chatgpt.com)<br>
+   – Model S/X: 6-pin Autopilot breakout or behind-MCU DB-26.</li>
+
+<li><strong>Micro-controller bridge</strong><br>
+   – <code>ESP32-WROOM-32</code> or <code>ESP32-S3</code> module.<br>
+   – High-speed CAN transceiver (SN65HVD230 or MCP2551) & matching 120 Ω termination.<br>
+   – Optional ready-made boards: CANable 2, CANBed M4, CAN-FD Feather.</li>
+
+<li><strong>Dev laptop</strong><br>
+   – Any OS; Wi-Fi to ESP32, or USB-Uart-to-CAN dongle (socketcan).</li>
+
+<li><strong>12 V to 5 V DC-DC</strong> for the ESP if you pull power from the vehicle.</li>
+
+</ol>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="arch">5.&nbsp;Suggested ESP32 ⇆ WebSocket ⇆ Phone architecture</h2>
+
+<figure>
+<pre>
+┌──────────────────────────────┐
+│  Tesla CAN bus (500 kbit/s)  │
+└──────────────┬───────────────┘
+               │  CAN‐H/L
+       ┌───────▼───────┐
+       │  SN65HVD230   │  (level shift)
+       └───────┬───────┘
+               │ CAN-RX/TX
+       ┌───────▼───────────────┐
+       │   ESP32-S3 module     │
+       │  • Async-CAN driver   │
+       │  • JSON / CBOR encode │
+       │  • HTTPS + WebSocket  │
+       └───────┬───────────────┘
+               │ Wi-Fi
+       ┌───────▼───────────┐
+       │  Phone / PWA      │
+       │  • Canvas speedo  │
+       │  • Side hotkeys   │
+       └───────────────────┘
+</pre>
+<figcaption>Proposed data flow (local-only network, TLS optional)</figcaption>
+</figure>
+
+<p><strong>Why it works well</strong></p>
+<ul>
+<li>ESP32 already provides both CAN (via built-in TWAI driver) and Wi-Fi; no Pi needed.</li>
+<li>Minimal latency – you can push ~800 frames / s on a single WebSocket in binary mode.</li>
+<li>The phone UI is just an HTTPS page; reload to update, no Play Store deployment.</li>
+</ul>
+
+<p><strong>Pitfalls</strong></p>
+<ul>
+<li>CAN bus ground offset → use common ground, add TVS protection.</li>
+<li>Wi-Fi AP in car loses Internet; make the PWA <code>manifest.json</code> <em>display-mode: standalone</em> & offline cache.</li>
+<li>Hotkeys: instead of transmitting CAN, let them call a cloud webhook (safer) unless the car is parked.</li>
+</ul>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="project">6.&nbsp;Hands-on project – DIY metric speedometer + soft-buttons</h2>
+
+<ol>
+<li><strong>Fit the phone behind the wheel.</strong> 3-D-print a low-profile cradle (PET-G, heat tolerant) that clips onto the steering-column shroud.</li>
+
+<li><strong>Wire & test CAN.</strong><br>
+   1. Ignite-off, connect splitter.<br>
+   2. Plug the ESP32-CAN board.<br>
+   3. Flash <code>listen-only</code> firmware (sample below).<br>
+   4. Check <code>candump</code> logs on the laptop via Wi-Fi.</li>
+
+<li><strong>Filter frames in firmware.</strong> Limit to IDs 0x118, 0x130, 0x12F to keep the WS payload tiny.</li>
+
+<li><strong>Serve the PWA.</strong> A 20-line <code>index.html</code> drawing a circular dial with SVG, plus a left/right button grid that posts JSON to <code>/hotkey</code>.</li>
+
+<li><strong>Add OTA & TLS.</strong> ESP-IDF supports <code>esp_https_server</code>; self-sign a certificate or pin the SHA-256 in the PWA.</li>
+</ol>
+
+<details>
+<summary>Firmware sketch excerpt (Arduino-ESP32 style)</summary>
+
+<pre>
+#include &lt;ESP32CAN.h&gt;
+#include &lt;CAN_config.h&gt;
+#include &lt;AsyncTCP.h&gt;
+#include &lt;ESPAsyncWebServer.h&gt;
+
+CAN_device_t CAN_cfg;
+AsyncWebSocket ws("/ws");
+AsyncWebServer  server(80);
+
+void setup() {
+  Serial.begin(115200);
+  // --- CAN init ---
+  CAN_cfg.speed = CAN_SPEED_500KBPS;
+  CAN_cfg.tx_pin_id = GPIO_NUM_5;
+  CAN_cfg.rx_pin_id = GPIO_NUM_4;
+  ESP32Can.CANInit();  // listen-only default
+  // --- WS ---
+  ws.onEvent([](...) { /* ignore */ });
+  server.addHandler(&ws);
+  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+  server.begin();
+}
+
+void loop() {
+  if (auto frame = ESP32Can.CANRead()) {
+    if (frame->MsgID == 0x118) {
+      uint16_t raw = frame->data.u8[1] << 8 | frame->data.u8[0];
+      float kph = raw / 20.0f;
+      ws.printfAll("{\"spd\":%.1f}", kph);
+    }
+  }
+}
+</pre>
+</details>
+
+<!-- ------------------------------------------------------------------ -->
+<h2 id="next">7.&nbsp;Where to go next</h2>
+
+<ul>
+<li><a href="https://github.com/commaai/openpilot">Comma OpenPilot</a> – production-grade logs & decoding scripts.</li>
+<li><a href="https://teslamotorsclub.com">Tesla Motors Club</a> threads on new frame IDs (search “Plaid CAN”).  [oai_citation:6‡Reddit](https://www.reddit.com/r/teslamotors/comments/qk6dkz/plaid_torque_can_messages_found_on_new_can_bus/?utm_source=chatgpt.com)</li>
+<li><em>Tesla Model S CAN Deciphering</em> PDF v0.1 – a goldmine of signal maps.  [oai_citation:7‡skie.net](https://skie.net/uploads/TeslaCAN/Tesla%20Model%20S%20CAN%20Deciphering%20-%20v0.1%20-%20by%20wk057.pdf?utm_source=chatgpt.com)</li>
+<li><code>canserver</code> project – drop-in ESP32 firmware with web UI, OTA, Prometheus.</li>
+</ul>
+
+<hr>
+
+<p>With an ESP32 bridge and a simple PWA you can build a latency-free, metric speedometer plus soft hotkeys in a weekend, without writing a single line of Android Java. The architecture is solid for read-heavy, write-light applications; just respect the Gateway, stay <em>listen-only</em> until you fully understand every byte you send, and happy hacking!</p>
+
+</body>
+</html>
